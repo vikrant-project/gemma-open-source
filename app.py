@@ -511,35 +511,80 @@ HTML_TEMPLATE = """
         /* Code Blocks */
         pre {
             background: #1e1e1e !important;
-            border-radius: 8px;
+            border-radius: 12px;
+            padding: 0;
+            overflow: hidden;
+            position: relative;
+            margin: 16px 0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .code-header {
+            background: #2d2d2d;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .code-language {
+            font-size: 12px;
+            color: #888;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .code-content {
             padding: 16px;
             overflow-x: auto;
-            position: relative;
-            margin: 10px 0;
         }
 
         code {
             font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        pre code {
+            background: transparent !important;
+            padding: 0 !important;
+        }
+
+        /* Inline code */
+        :not(pre) > code {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
             font-size: 13px;
+            color: #e06c75;
+        }
+
+        [data-theme="light"] :not(pre) > code {
+            background: rgba(0, 0, 0, 0.06);
+            color: #c7254e;
         }
 
         .copy-code-btn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
             padding: 6px 12px;
             background: rgba(255, 255, 255, 0.1);
-            border: none;
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 6px;
             color: white;
             font-size: 11px;
+            font-weight: 600;
             cursor: pointer;
-            opacity: 0;
-            transition: opacity 0.2s;
+            transition: all 0.2s;
         }
 
-        pre:hover .copy-code-btn {
-            opacity: 1;
+        .copy-code-btn:hover {
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
+        }
+
+        .copy-code-btn.copied {
+            background: #34C759;
+            border-color: #34C759;
         }
 
         /* Export Button */
@@ -715,6 +760,48 @@ HTML_TEMPLATE = """
         let currentTheme = 'dark';
         let isGenerating = false;
 
+        // Configure marked.js
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    try {
+                        return hljs.highlight(code, { language: lang }).value;
+                    } catch (e) {}
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true,
+            gfm: true
+        });
+
+        // Custom renderer for code blocks with copy button
+        const renderer = new marked.Renderer();
+        const originalCodeRenderer = renderer.code.bind(renderer);
+        
+        renderer.code = function(code, language) {
+            const validLang = language || 'text';
+            const langName = validLang.charAt(0).toUpperCase() + validLang.slice(1);
+            const highlighted = language && hljs.getLanguage(language)
+                ? hljs.highlight(code, { language: language }).value
+                : hljs.highlightAuto(code).value;
+            
+            return `
+                <pre>
+                    <div class="code-header">
+                        <span class="code-language">${langName}</span>
+                        <button class="copy-code-btn" onclick="copyCode(this, \`${code.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
+                            Copy
+                        </button>
+                    </div>
+                    <div class="code-content">
+                        <code class="hljs language-${validLang}">${highlighted}</code>
+                    </div>
+                </pre>
+            `;
+        };
+
+        marked.use({ renderer });
+
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             createParticles();
@@ -841,11 +928,6 @@ HTML_TEMPLATE = """
                     aiMessageContent += event.data;
                     const bubble = aiMessageDiv.querySelector('.message-bubble');
                     bubble.innerHTML = marked.parse(aiMessageContent);
-                    
-                    // Highlight code blocks
-                    bubble.querySelectorAll('pre code').forEach((block) => {
-                        hljs.highlightElement(block);
-                    });
 
                     scrollToBottom();
                 };
@@ -901,13 +983,35 @@ HTML_TEMPLATE = """
             return messageDiv;
         }
 
+        // Copy code from code block
+        function copyCode(btn, code) {
+            navigator.clipboard.writeText(code).then(() => {
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                btn.textContent = 'Failed';
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+
         // Copy message
         function copyMessage(btn) {
             const bubble = btn.closest('.message').querySelector('.message-bubble');
             const text = bubble.innerText;
-            navigator.clipboard.writeText(text);
-            btn.textContent = 'Copied!';
-            setTimeout(() => btn.textContent = 'Copy', 2000);
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
         }
 
         // Regenerate last response
