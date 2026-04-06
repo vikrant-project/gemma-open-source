@@ -1,0 +1,44 @@
+# Chat storage (user data)
+chat_sessions.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+venv/
+env/
+
+# Template structure (not needed for this single-file app)
+backend/
+frontend/
+tests/
+scripts/
+node_modules/
+package.json
+package-lock.json
+yarn.lock
+requirements.txt
