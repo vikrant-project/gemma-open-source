@@ -5,7 +5,7 @@ A ChatGPT-style interface for Gemma 2B via Ollama
 Host: 0.0.0.0:9087 | Model: gemma:2b
 """
 
-from flask import Flask, render_template_string, request, jsonify, session, Response
+from flask import Flask, render_template_string, request, jsonify, Response, make_response
 from flask_cors import CORS
 import requests
 import json
@@ -17,6 +17,9 @@ import secrets
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 CORS(app)
+
+# In-memory session storage
+active_sessions = {}
 
 # Configuration
 OLLAMA_API = "http://localhost:11434/api/chat"
@@ -56,15 +59,15 @@ def save_sessions(sessions):
         print(f"Error saving sessions: {e}")
 
 def get_session_id():
-    """Get or create session ID"""
-    if 'session_id' not in session:
-        session['session_id'] = str(uuid.uuid4())
-    return session['session_id']
+    """Get or create session ID from cookie"""
+    sid = request.cookies.get('session_id')
+    if not sid:
+        sid = str(uuid.uuid4())
+    return sid
 
-def get_conversation():
+def get_conversation(sid):
     """Get current conversation history"""
     sessions = load_sessions()
-    sid = get_session_id()
     if sid not in sessions:
         sessions[sid] = {
             'messages': [],
@@ -74,10 +77,9 @@ def get_conversation():
         save_sessions(sessions)
     return sessions[sid]['messages']
 
-def save_conversation(messages, title=None):
+def save_conversation(sid, messages, title=None):
     """Save conversation history"""
     sessions = load_sessions()
-    sid = get_session_id()
     if sid not in sessions:
         sessions[sid] = {
             'created_at': datetime.now().isoformat()
@@ -1014,7 +1016,13 @@ HTML_TEMPLATE = """
 @app.route('/')
 def index():
     """Serve the main page"""
-    return render_template_string(HTML_TEMPLATE)
+    response = make_response(render_template_string(HTML_TEMPLATE))
+    
+    # Set session cookie if not exists
+    if not request.cookies.get('session_id'):
+        response.set_cookie('session_id', str(uuid.uuid4()), max_age=30*24*60*60)
+    
+    return response
 
 @app.route('/status')
 def status():
@@ -1033,10 +1041,13 @@ def chat():
     if not message:
         return jsonify({"error": "No message provided"}), 400
 
+    # Get session ID
+    sid = get_session_id()
+
     def generate():
         try:
             # Get conversation history
-            conversation = get_conversation()
+            conversation = get_conversation(sid)
             
             # Build messages for Ollama with system prompt
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -1087,7 +1098,7 @@ def chat():
             if len(conversation) == 2:  # First exchange
                 title = message[:30] + "..." if len(message) > 30 else message
             
-            save_conversation(conversation, title)
+            save_conversation(sid, conversation, title)
             
             yield "data: [DONE]\n\n"
             
@@ -1101,8 +1112,10 @@ def new_chat():
     """Create a new chat session"""
     try:
         # Create new session ID
-        session['session_id'] = str(uuid.uuid4())
-        return jsonify({"success": True, "session_id": session['session_id']})
+        new_sid = str(uuid.uuid4())
+        response = make_response(jsonify({"success": True, "session_id": new_sid}))
+        response.set_cookie('session_id', new_sid, max_age=30*24*60*60)
+        return response
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1128,12 +1141,13 @@ def history():
 def regenerate():
     """Regenerate last response"""
     try:
-        conversation = get_conversation()
+        sid = get_session_id()
+        conversation = get_conversation(sid)
         
         # Remove last assistant message if exists
         if conversation and conversation[-1]['role'] == 'assistant':
             conversation.pop()
-            save_conversation(conversation)
+            save_conversation(sid, conversation)
         
         return jsonify({"success": True})
     except Exception as e:
@@ -1143,9 +1157,9 @@ def regenerate():
 def export():
     """Export current chat"""
     try:
-        conversation = get_conversation()
-        sessions = load_sessions()
         sid = get_session_id()
+        conversation = get_conversation(sid)
+        sessions = load_sessions()
         
         export_data = {
             "session_id": sid,
